@@ -1,0 +1,298 @@
+---
+title: "Demonstration of the COMBO R Package for Two-Stage Models"
+author: 'Created by Kimberly A. Hochstedler. Contact: kah343@cornell.edu'
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE, error = FALSE, message = FALSE,
+                      fig.align = "center")
+
+library(ggplot2)
+library(kableExtra)
+```
+
+\centering
+![](/Users/hochsted/Dropbox/Misclassification/Code/RPackages/hex_stickers/COMBO_Hex_Sticker_cropped.png){width=30%}
+
+\raggedright
+
+In this vignette, we provide a demonstration of the R Package *COMBO* (correcting misclassified binary outcomes) for analyzing two-stage models. This package provides methods for fitting logistic regression models when two sequential binary outcomes are potentially misclassified. Technical details about estimation are not included in this demonstration. For additional information on the methods used in this R Package, please consult ``Statistical inference for association studies in the presence of binary outcome misclassification" by Kimberly A. Hochstedler and Martin T. Wells. 
+
+
+## Model and Conceptual Framework
+Let $Y = j$ denote an observation's true outcome status, taking values $j \in \{1, 2\}$. Suppose we are interested in the relationship between $Y$ and a set of predictors, $X$, that are correctly measured. This relationship constitutes the \textit{true outcome mechanism}. Let $Y^{*(1)} = k$ be the first-stage observed outcome status, taking values $k \in \{1,2\}$. Let $Y^{*(2)} = \ell$ be the second-stage observed outcome status, taking values $\ell \in \{1,2\}$. $Y^{*(1)}$ and $Y^{*(2)}$ are potentially misclassified versions of $Y$. Let $Z^{(1)}$ and $Z^{(2)}$ denote sets of predictors related to first-stage and second-stage misclassification, respectively. The mechanism that generates the observed outcomes, $Y^{*(1)}$ and $Y^{*(2)}$, given the true outcome, $Y$, is called the \textit{observation mechanism}. **Figure 1** displays the conceptual model. The following equations express the conceptual process mathematically.
+
+$$\text{True outcome mechanism: } \text{logit}\{ P(Y = j | X ; \beta) \} = \beta_{j0} + \beta_{jX} X$$
+$$\text{First-stage observation mechanism: } \text{logit}\{ P(Y^{*(1)} = k | Y = j, Z^{(1)} ; \gamma^{(1)}) \} = \gamma^{(1)}_{kj0} + \gamma^{(1)}_{kjZ^{(1)}} Z^{(1)}$$
+$$\text{Second-stage observation mechanism: } \text{logit}\{ P(Y^{*(2)} = \ell | Y^{*(1)} = k, Y = j, Z^{(2)} ; \gamma^{(2)}) \} = \gamma^{(2)}_{\ell kj0} + \gamma^{(2)}_{\ell kjZ^{(2)}} Z^{(2)}$$
+
+\centering
+![Conceptual Model](/Users/hochsted/Dropbox/Misclassification/Code/RPackages/GitHub/COMBO_Demo/multistage_data_structure.png)
+
+\raggedright
+
+## Simulate data
+We begin this demonstration by generating data using the `COMBO_data_2stage()` function. The binary outcome data simulated by this scheme is subject to misclassification. The predictor related to the true outcome mechanism is "x", the predictor related to the first-stage observation mechanism is "z", and the predictor related to the second-stage observation mechanism is "v". 
+```{r}
+library(COMBO)
+library(dplyr)
+library(stringr)
+
+# Set seed.
+set.seed(123)
+
+# Set sample size, x and z distribution information.
+n <- 1000
+x_mu <- 0
+x_sigma <- 1
+z_shape <- 1
+v_shape <- 1
+
+# Set true parameter values.
+true_beta <- matrix(c(1, -2), ncol = 1)
+true_gamma <- matrix(c(.5, 1, -.5, -1), nrow = 2, byrow = FALSE)
+true_delta <- array(c(1.5, 1, .5, .5, -.5, 0, -1, -1), dim = c(2, 2, 2))
+
+# Generate data.
+my_data <- COMBO_data_2stage(sample_size = n,
+                             x_mu = x_mu, x_sigma = x_sigma,
+                             z_shape = z_shape, v_shape = v_shape,
+                             beta = true_beta, gamma = true_gamma,
+                             delta = true_delta)
+
+# Save list elements as vectors.
+Ystar <- my_data[["obs_Ystar"]]
+Ytilde <- my_data[["obs_Ytilde"]]
+x_matrix <- my_data[["x"]]
+z_matrix <- my_data[["z"]]
+v_matrix <- my_data[["v"]]
+```
+
+## Effect estimation
+We propose estimation methods using the Expectation-Maximization algorithm (EM) and Markov Chain Monte Carlo (MCMC). Each method checks and corrects instances of label switching, as described in Hochstedler and Wells (2022). In the code below, we provide functions for implementing these methods. 
+```{r}
+# Supply starting values for all parameters.
+starting_values <- rep(1,14)
+beta_start <- matrix(starting_values[1:2], ncol = 1)
+gamma_start <- matrix(starting_values[3:6], ncol = 2, nrow = 2, byrow = FALSE)
+delta_start <- array(starting_values[7:14], dim = c(2,2,2))
+
+# Estimate parameters using the EM-Algorithm.
+EM_results <- COMBO_EM_2stage(Ystar, Ytilde,
+                              x_matrix = x_matrix, z_matrix = z_matrix,
+                              v_matrix = v_matrix,
+                              beta_start = beta_start, gamma_start = gamma_start,
+                              delta_start = delta_start)
+
+EM_results
+```
+
+```{r}
+# Specify parameters for the prior distributions.
+unif_lower_beta <- matrix(c(-5, -5, NA, NA), nrow = 2, byrow = TRUE)
+unif_upper_beta <- matrix(c(5, 5, NA, NA), nrow = 2, byrow = TRUE)
+
+unif_lower_gamma <- array(data = c(-5, NA, -5, NA, -5, NA, -5, NA),
+                          dim = c(2,2,2))
+unif_upper_gamma <- array(data = c(5, NA, 5, NA, 5, NA, 5, NA),
+                          dim = c(2,2,2))
+
+unif_upper_delta <- array(rep(c(5, NA), 8), dim = c(2,2,2,2))
+unif_lower_delta <- array(rep(c(-5, NA), 8), dim = c(2,2,2,2))
+
+beta_prior_parameters <- list(lower = unif_lower_beta, upper = unif_upper_beta)
+gamma_prior_parameters <- list(lower = unif_lower_gamma, upper = unif_upper_gamma)
+delta_prior_parameters <- list(lower = unif_lower_delta, upper = unif_upper_delta)
+
+# Estimate parameters using MCMC. 
+MCMC_results <- COMBO_MCMC_2stage(Ystar, Ytilde,
+                                  x = x_matrix, z = z_matrix, v = v_matrix,
+                                  prior = "uniform",
+                                  beta_prior_parameters = beta_prior_parameters,
+                                  gamma_prior_parameters = gamma_prior_parameters,
+                                  delta_prior_parameters = delta_prior_parameters,
+                                  naive_delta_prior_parameters = gamma_prior_parameters,
+                                  number_MCMC_chains = 4,
+                                  MCMC_sample = 6000, burn_in = 2000)
+
+MCMC_results$posterior_means_df
+MCMC_results$naive_posterior_means_df
+```
+
+### Plotting effect estimates
+**Figure 2** shows the parameter estimates (+/- one standard deviation) for different analysis methods: EM, MCMC, and a ``naive" two-stage regression. 
+```{r, echo = FALSE}
+MCMC_SD <- MCMC_results$posterior_sample_df %>%
+  group_by(parameter) %>%
+  summarise(SD = sd(sample)) %>%
+  ungroup()
+MCMC_results_df <- data.frame(Parameter = c("beta1", "beta2",
+                                            "gamma11", "gamma12",
+                                            "gamma21", "gamma22",
+                                            "delta111", "delta112",
+                                            "delta121", "delta122",
+                                            "delta211", "delta212",
+                                            "delta221", "delta222"),
+                              Estimates = MCMC_results$posterior_means_df$posterior_mean,
+                              SE = MCMC_SD$SD)
+
+results_df <- rbind(EM_results[,-4], MCMC_results_df)
+
+results_df$lower <- results_df$Estimates - results_df$SE
+results_df$upper <- results_df$Estimates + results_df$SE
+results_df$method <- c(rep("EM", 14),
+                       rep("Naive", 6), rep("MCMC", 14))
+results_df$Parameter <- c("beta1", "beta2", "gamma11", "gamma21", "gamma12", "gamma22",
+                          "delta111", "delta211", "delta121", "delta221",
+                          "delta112", "delta212", "delta122", "delta222",
+                          "beta1", "beta2", "delta111", "delta211", "delta122", "delta222",
+                          "beta1", "beta2", "gamma11", "gamma12", "gamma21", "gamma22",
+                          "delta111", "delta112", "delta121", "delta122",
+                          "delta211", "delta212", "delta221", "delta222")
+results_df$place_holder <- 1
+results_df$True_Value <- c(c(true_beta), c(true_gamma), c(true_delta),
+                           c(true_beta), c(true_delta[,1,1]), c(true_delta[,2,2]),
+                           c(true_beta), true_gamma[1,], true_gamma[2,],
+                           c(true_delta[1,,][1,]), c(true_delta[1,,][2,]),
+                           c(true_delta[2,,][1,]), c(true_delta[2,,][2,]))
+
+ggplot(data = results_df %>%
+         filter(str_detect(Parameter, "beta") |
+                  str_detect(Parameter, "gamma"))) +
+  geom_hline(aes(yintercept = True_Value), linetype = "dashed") +
+  geom_point(aes(y = Estimates, x = method, color = method), size = 2) +
+  geom_linerange(aes(ymin = lower, ymax = upper, x = method, color = method)) +
+  facet_grid(~Parameter, scales = "free") +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggtitle("Parameter estimates across analysis methods",
+          subtitle = "Dashed line denotes true parameter value.") +
+  labs(x = "Parameter", y = "Estimate", color = "Method") +
+  theme(legend.position = "bottom")
+
+ggplot(data = results_df %>%
+         filter(str_detect(Parameter, "delta"))) +
+  geom_hline(aes(yintercept = True_Value), linetype = "dashed") +
+  geom_point(aes(y = Estimates, x = method, color = method), size = 2) +
+  geom_linerange(aes(ymin = lower, ymax = upper, x = method, color = method)) +
+  facet_grid(~Parameter, scales = "free") +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggtitle("Parameter estimates across analysis methods",
+          subtitle = "Dashed line denotes true parameter value.") +
+  labs(x = "Parameter", y = "Estimate", color = "Method") +
+  theme(legend.position = "bottom")
+```
+
+## Estimating sensitivity and specificity
+For each analysis method, we may use the estimated $\gamma$ parameters to compute estimates of first-stage and second-stage sensitivity and specificity as a function of the covariates, $z$ and $v$, respectively. Here, we compute these values under the EM algorithm estimates, MCMC estimates, and using the generated data. 
+```{r}
+# Create matrix of gamma parameter estimates from the EM algorithm.
+EM_gamma <- matrix(EM_results$Estimates[3:6], ncol = 2, byrow = FALSE)
+EM_delta <- array(EM_results$Estimates[7:14], dim = c(2,2,2))
+
+# Compute misclassification probabilities.
+EM_misclassification_prob <- misclassification_prob(EM_gamma,
+                                                    matrix(z_matrix, ncol = 1))
+EM_misclassification_prob2 <- misclassification_prob2(EM_delta,
+                                                      matrix(v_matrix, ncol = 1))
+
+# Find the average sensitivity and specificity. 
+EM_sensitivity_df <- EM_misclassification_prob %>% 
+  filter(Y == 1) %>% filter(Ystar == 1)
+EM_sensitivity <- mean(EM_sensitivity_df$Probability)
+
+EM_specificity_df <- EM_misclassification_prob %>% 
+  filter(Y == 2) %>% filter(Ystar == 2)
+EM_specificity <- mean(EM_specificity_df$Probability)
+
+EM_sensitivity2_df <- EM_misclassification_prob2 %>%
+  filter(Y == 1) %>% filter(Ystar == 1) %>% filter(Ytilde == 1)
+EM_sensitivity2 <- mean(EM_sensitivity2_df$Probability)
+
+EM_specificity2_df <- EM_misclassification_prob2 %>%
+  filter(Y == 2) %>% filter(Ystar == 2) %>% filter(Ytilde == 2)
+EM_specificity2 <- mean(EM_specificity2_df$Probability)
+```
+
+```{r}
+# Create matrix of gamma parameter estimates from MCMC.
+MCMC_gamma <- matrix(MCMC_results$posterior_means_df$posterior_mean[3:6],
+                     ncol = 2, byrow = TRUE)
+MCMC_delta <- array(MCMC_results$posterior_means_df$posterior_mean[c(7, 11,
+                                                                     9, 13,
+                                                                     8, 12,
+                                                                     10, 14)],
+                    dim = c(2,2,2))
+
+# Compute misclassification probabilities.
+MCMC_misclassification_prob <- misclassification_prob(MCMC_gamma,
+                                                      matrix(z_matrix, ncol = 1))
+MCMC_misclassification_prob2 <- misclassification_prob2(MCMC_delta,
+                                                        matrix(v_matrix, ncol = 1))
+
+# Find the average sensitivity and specificity
+MCMC_sensitivity_df <- MCMC_misclassification_prob %>% 
+  filter(Y == 1) %>% filter(Ystar == 1)
+MCMC_sensitivity <- mean(MCMC_sensitivity_df$Probability)
+
+MCMC_specificity_df <- MCMC_misclassification_prob %>% 
+  filter(Y == 2) %>% filter(Ystar == 2)
+MCMC_specificity <- mean(MCMC_specificity_df$Probability)
+
+MCMC_sensitivity2_df <- MCMC_misclassification_prob2 %>%
+  filter(Y == 1) %>% filter(Ystar == 1) %>% filter(Ytilde == 1)
+MCMC_sensitivity2 <- mean(MCMC_sensitivity2_df$Probability)
+
+MCMC_specificity2_df <- MCMC_misclassification_prob2 %>%
+  filter(Y == 2) %>% filter(Ystar == 2) %>% filter(Ytilde == 2)
+MCMC_specificity2 <- mean(MCMC_specificity2_df$Probability)
+```
+
+```{r}
+# Use the generated data to compute the actual sensitivity and specificity rate.
+data_classification_table <- table(my_data[["obs_Ystar"]], my_data[["true_Y"]])
+
+data_classification_table2 <- table(my_data[["obs_Ytilde"]], my_data[["obs_Ystar"]], my_data[["true_Y"]])
+
+true_sensitivity <- prop.table(data_classification_table, 2)[1,1]
+
+true_specificity <- prop.table(data_classification_table, 2)[2,2]
+
+true_sensitivity_2stage <- data_classification_table2[1,1,1] / 
+  sum(data_classification_table2[,1,1])
+
+true_specificity_2stage <- data_classification_table2[2,2,2] / 
+  sum(data_classification_table2[,2,2])
+```
+
+```{r, echo = FALSE}
+misclass_results <- data.frame(Data = c(true_sensitivity, true_specificity),
+                               EM = c(EM_sensitivity, EM_specificity),
+                               MCMC = c(MCMC_sensitivity, MCMC_specificity)) %>%
+  round(3)
+
+misclass_results2 <- data.frame(Data = c(true_sensitivity_2stage, true_specificity_2stage),
+                               EM = c(EM_sensitivity2, EM_specificity2),
+                               MCMC = c(MCMC_sensitivity2, MCMC_specificity2)) %>%
+  round(3)
+
+kbl(t(misclass_results), col.names = c("Sensitivity, P(Y*(1) = 1 | Y = 1)",
+                                       "Specificity, P(Y*(1) = 2 | Y = 2)"),
+    booktabs = TRUE) %>%
+  kable_styling(latex_options = "HOLD_position")
+
+kbl(t(misclass_results2), col.names = c("P(Y*(2) = 1 |Y*(1) = 1,  Y = 1)",
+                                       "P(Y*(2) = 2 | Y*(1) = 2, Y = 2)"),
+    booktabs = TRUE) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+**Table 1** shows the actual sensitivity and specificity values for the data, in addition to the average sensitivity and specificity estimates computed from EM-Algorithm and MCMC parameter estimates and the covariate $z$ and $v$. 
+
+## References
+Hochstedler, K.A. and Wells, M.T. ``Statistical inference for association studies in the presence of binary outcome misclassification", (2022). In preparation.
