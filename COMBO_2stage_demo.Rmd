@@ -50,27 +50,27 @@ set.seed(123)
 n <- 1000
 x_mu <- 0
 x_sigma <- 1
-z_shape <- 1
-v_shape <- 1
+z1_shape <- 1
+z2_shape <- 1
 
 # Set true parameter values.
 true_beta <- matrix(c(1, -2), ncol = 1)
-true_gamma <- matrix(c(.5, 1, -.5, -1), nrow = 2, byrow = FALSE)
-true_delta <- array(c(1.5, 1, .5, .5, -.5, 0, -1, -1), dim = c(2, 2, 2))
+true_gamma1 <- matrix(c(.5, 1, -.5, -1), nrow = 2, byrow = FALSE)
+true_gamma2 <- array(c(1.5, 1, .5, .5, -.5, 0, -1, -1), dim = c(2, 2, 2))
 
 # Generate data.
 my_data <- COMBO_data_2stage(sample_size = n,
                              x_mu = x_mu, x_sigma = x_sigma,
-                             z_shape = z_shape, v_shape = v_shape,
-                             beta = true_beta, gamma = true_gamma,
-                             delta = true_delta)
+                             z1_shape = z1_shape, z2_shape = z2_shape,
+                             beta = true_beta, gamma1 = true_gamma1,
+                             gamma2 = true_gamma2)
 
 # Save list elements as vectors.
-Ystar <- my_data[["obs_Ystar"]]
-Ytilde <- my_data[["obs_Ytilde"]]
+Ystar1 <- my_data[["obs_Ystar1"]]
+Ystar2 <- my_data[["obs_Ystar2"]]
 x_matrix <- my_data[["x"]]
-z_matrix <- my_data[["z"]]
-v_matrix <- my_data[["v"]]
+z1_matrix <- my_data[["z1"]]
+z2_matrix <- my_data[["z2"]]
 ```
 
 ## Effect estimation
@@ -79,15 +79,17 @@ We propose estimation methods using the Expectation-Maximization algorithm (EM) 
 # Supply starting values for all parameters.
 starting_values <- rep(1,14)
 beta_start <- matrix(starting_values[1:2], ncol = 1)
-gamma_start <- matrix(starting_values[3:6], ncol = 2, nrow = 2, byrow = FALSE)
-delta_start <- array(starting_values[7:14], dim = c(2,2,2))
+gamma1_start <- matrix(starting_values[3:6], ncol = 2, nrow = 2, byrow = FALSE)
+gamma2_start <- array(starting_values[7:14], dim = c(2,2,2))
 
 # Estimate parameters using the EM-Algorithm.
-EM_results <- COMBO_EM_2stage(Ystar, Ytilde,
-                              x_matrix = x_matrix, z_matrix = z_matrix,
-                              v_matrix = v_matrix,
-                              beta_start = beta_start, gamma_start = gamma_start,
-                              delta_start = delta_start)
+EM_results <- COMBO_EM_2stage(Ystar1, Ystar2,
+                              x_matrix = x_matrix,
+                              z1_matrix = z1_matrix,
+                              z2_matrix = z2_matrix,
+                              beta_start = beta_start,
+                              gamma1_start = gamma1_start,
+                              gamma2_start = gamma2_start)
 
 EM_results
 ```
@@ -97,28 +99,30 @@ EM_results
 unif_lower_beta <- matrix(c(-5, -5, NA, NA), nrow = 2, byrow = TRUE)
 unif_upper_beta <- matrix(c(5, 5, NA, NA), nrow = 2, byrow = TRUE)
 
-unif_lower_gamma <- array(data = c(-5, NA, -5, NA, -5, NA, -5, NA),
+unif_lower_gamma1 <- array(data = c(-5, NA, -5, NA, -5, NA, -5, NA),
                           dim = c(2,2,2))
-unif_upper_gamma <- array(data = c(5, NA, 5, NA, 5, NA, 5, NA),
+unif_upper_gamma1 <- array(data = c(5, NA, 5, NA, 5, NA, 5, NA),
                           dim = c(2,2,2))
 
-unif_upper_delta <- array(rep(c(5, NA), 8), dim = c(2,2,2,2))
-unif_lower_delta <- array(rep(c(-5, NA), 8), dim = c(2,2,2,2))
+unif_upper_gamma2 <- array(rep(c(5, NA), 8), dim = c(2,2,2,2))
+unif_lower_gamma2 <- array(rep(c(-5, NA), 8), dim = c(2,2,2,2))
 
 beta_prior_parameters <- list(lower = unif_lower_beta, upper = unif_upper_beta)
-gamma_prior_parameters <- list(lower = unif_lower_gamma, upper = unif_upper_gamma)
-delta_prior_parameters <- list(lower = unif_lower_delta, upper = unif_upper_delta)
+gamma1_prior_parameters <- list(lower = unif_lower_gamma1, upper = unif_upper_gamma1)
+gamma2_prior_parameters <- list(lower = unif_lower_gamma2, upper = unif_upper_gamma2)
 
 # Estimate parameters using MCMC. 
-MCMC_results <- COMBO_MCMC_2stage(Ystar, Ytilde,
-                                  x = x_matrix, z = z_matrix, v = v_matrix,
+MCMC_results <- COMBO_MCMC_2stage(Ystar1, Ystar2,
+                                  x_matrix = x_matrix, 
+                                  z1_matrix = z1_matrix,
+                                  z2_matrix = z2_matrix,
                                   prior = "uniform",
-                                  beta_prior_parameters = beta_prior_parameters,
-                                  gamma_prior_parameters = gamma_prior_parameters,
-                                  delta_prior_parameters = delta_prior_parameters,
-                                  naive_delta_prior_parameters = gamma_prior_parameters,
+                                  beta_prior_parameters,
+                                  gamma1_prior_parameters,
+                                  gamma2_prior_parameters,
+                                  naive_gamma2_prior_parameters = gamma1_prior_parameters,
                                   number_MCMC_chains = 4,
-                                  MCMC_sample = 6000, burn_in = 2000)
+                                  MCMC_sample = 2000, burn_in = 1000)
 
 MCMC_results$posterior_means_df
 MCMC_results$naive_posterior_means_df
@@ -128,16 +132,16 @@ MCMC_results$naive_posterior_means_df
 **Figure 2** shows the parameter estimates (+/- one standard deviation) for different analysis methods: EM, MCMC, and a ``naive" two-stage regression. 
 ```{r, echo = FALSE}
 MCMC_SD <- MCMC_results$posterior_sample_df %>%
-  group_by(parameter) %>%
+  group_by(parameter_name) %>%
   summarise(SD = sd(sample)) %>%
   ungroup()
 MCMC_results_df <- data.frame(Parameter = c("beta1", "beta2",
-                                            "gamma11", "gamma12",
-                                            "gamma21", "gamma22",
-                                            "delta111", "delta112",
-                                            "delta121", "delta122",
-                                            "delta211", "delta212",
-                                            "delta221", "delta222"),
+                                            "gamma1_11", "gamma1_12",
+                                            "gamma1_21", "gamma1_22",
+                                            "gamma2_111", "gamma2_112",
+                                            "gamma2_121", "gamma2_122",
+                                            "gamma2_211", "gamma2_212",
+                                            "gamma2_221", "gamma2_222"),
                               Estimates = MCMC_results$posterior_means_df$posterior_mean,
                               SE = MCMC_SD$SD)
 
@@ -147,23 +151,26 @@ results_df$lower <- results_df$Estimates - results_df$SE
 results_df$upper <- results_df$Estimates + results_df$SE
 results_df$method <- c(rep("EM", 14),
                        rep("Naive", 6), rep("MCMC", 14))
-results_df$Parameter <- c("beta1", "beta2", "gamma11", "gamma21", "gamma12", "gamma22",
-                          "delta111", "delta211", "delta121", "delta221",
-                          "delta112", "delta212", "delta122", "delta222",
-                          "beta1", "beta2", "delta111", "delta211", "delta122", "delta222",
-                          "beta1", "beta2", "gamma11", "gamma12", "gamma21", "gamma22",
-                          "delta111", "delta112", "delta121", "delta122",
-                          "delta211", "delta212", "delta221", "delta222")
+results_df$Parameter <- c("beta1", "beta2",
+                          "gamma1_11", "gamma1_21", "gamma1_12", "gamma1_22",
+                          "gamma2_111", "gamma2_211", "gamma2_121", "gamma2_221",
+                          "gamma2_112", "gamma2_212", "gamma2_122", "gamma2_222",
+                          "beta1", "beta2",
+                          "gamma2_111", "gamma2_211", "gamma2_122", "gamma2_222",
+                          "beta1", "beta2",
+                          "gamma1_11", "gamma1_12", "gamma1_21", "gamma1_22",
+                          "gamma2_111", "gamma2_112", "gamma2_121", "gamma2_122",
+                          "gamma2_211", "gamma2_212", "gamma2_221", "gamma2_222")
 results_df$place_holder <- 1
-results_df$True_Value <- c(c(true_beta), c(true_gamma), c(true_delta),
-                           c(true_beta), c(true_delta[,1,1]), c(true_delta[,2,2]),
-                           c(true_beta), true_gamma[1,], true_gamma[2,],
-                           c(true_delta[1,,][1,]), c(true_delta[1,,][2,]),
-                           c(true_delta[2,,][1,]), c(true_delta[2,,][2,]))
+results_df$True_Value <- c(c(true_beta), c(true_gamma1), c(true_gamma2),
+                           c(true_beta), c(true_gamma2[,1,1]), c(true_gamma2[,2,2]),
+                           c(true_beta), true_gamma1[1,], true_gamma1[2,],
+                           c(true_gamma2[1,,][1,]), c(true_gamma2[1,,][2,]),
+                           c(true_gamma2[2,,][1,]), c(true_gamma2[2,,][2,]))
 
 ggplot(data = results_df %>%
          filter(str_detect(Parameter, "beta") |
-                  str_detect(Parameter, "gamma"))) +
+                  str_detect(Parameter, "gamma1"))) +
   geom_hline(aes(yintercept = True_Value), linetype = "dashed") +
   geom_point(aes(y = Estimates, x = method, color = method), size = 2) +
   geom_linerange(aes(ymin = lower, ymax = upper, x = method, color = method)) +
@@ -176,7 +183,7 @@ ggplot(data = results_df %>%
   theme(legend.position = "bottom")
 
 ggplot(data = results_df %>%
-         filter(str_detect(Parameter, "delta"))) +
+         filter(str_detect(Parameter, "gamma2"))) +
   geom_hline(aes(yintercept = True_Value), linetype = "dashed") +
   geom_point(aes(y = Estimates, x = method, color = method), size = 2) +
   geom_linerange(aes(ymin = lower, ymax = upper, x = method, color = method)) +
@@ -194,17 +201,17 @@ For each analysis method, we may use the estimated $\gamma$ parameters to comput
 ```{r}
 # Create matrix of gamma parameter estimates from the EM algorithm.
 EM_gamma <- matrix(EM_results$Estimates[3:6], ncol = 2, byrow = FALSE)
-EM_delta <- array(EM_results$Estimates[7:14], dim = c(2,2,2))
+EM_gamma2 <- array(EM_results$Estimates[7:14], dim = c(2,2,2))
 
 # Compute misclassification probabilities.
 EM_misclassification_prob <- misclassification_prob(EM_gamma,
-                                                    matrix(z_matrix, ncol = 1))
-EM_misclassification_prob2 <- misclassification_prob2(EM_delta,
-                                                      matrix(v_matrix, ncol = 1))
+                                                    matrix(z1_matrix, ncol = 1))
+EM_misclassification_prob2 <- misclassification_prob2(EM_gamma2,
+                                                      matrix(z2_matrix, ncol = 1))
 
 # Find the average sensitivity and specificity. 
 EM_sensitivity_df <- EM_misclassification_prob %>% 
-  filter(Y == 1) %>% filter(Ystar == 1)
+  filter(Y == 1) %>% filter(Ystar== 1)
 EM_sensitivity <- mean(EM_sensitivity_df$Probability)
 
 EM_specificity_df <- EM_misclassification_prob %>% 
@@ -212,11 +219,11 @@ EM_specificity_df <- EM_misclassification_prob %>%
 EM_specificity <- mean(EM_specificity_df$Probability)
 
 EM_sensitivity2_df <- EM_misclassification_prob2 %>%
-  filter(Y == 1) %>% filter(Ystar == 1) %>% filter(Ytilde == 1)
+  filter(Y == 1) %>% filter(Ystar1 == 1) %>% filter(Ystar2 == 1)
 EM_sensitivity2 <- mean(EM_sensitivity2_df$Probability)
 
 EM_specificity2_df <- EM_misclassification_prob2 %>%
-  filter(Y == 2) %>% filter(Ystar == 2) %>% filter(Ytilde == 2)
+  filter(Y == 2) %>% filter(Ystar1 == 2) %>% filter(Ystar2 == 2)
 EM_specificity2 <- mean(EM_specificity2_df$Probability)
 ```
 
@@ -224,17 +231,17 @@ EM_specificity2 <- mean(EM_specificity2_df$Probability)
 # Create matrix of gamma parameter estimates from MCMC.
 MCMC_gamma <- matrix(MCMC_results$posterior_means_df$posterior_mean[3:6],
                      ncol = 2, byrow = TRUE)
-MCMC_delta <- array(MCMC_results$posterior_means_df$posterior_mean[c(7, 11,
-                                                                     9, 13,
-                                                                     8, 12,
-                                                                     10, 14)],
-                    dim = c(2,2,2))
+MCMC_gamma2 <- array(MCMC_results$posterior_means_df$posterior_mean[c(7, 11,
+                                                                      9, 13,
+                                                                      8, 12,
+                                                                      10, 14)],
+                     dim = c(2,2,2))
 
 # Compute misclassification probabilities.
 MCMC_misclassification_prob <- misclassification_prob(MCMC_gamma,
-                                                      matrix(z_matrix, ncol = 1))
-MCMC_misclassification_prob2 <- misclassification_prob2(MCMC_delta,
-                                                        matrix(v_matrix, ncol = 1))
+                                                      matrix(z1_matrix, ncol = 1))
+MCMC_misclassification_prob2 <- misclassification_prob2(MCMC_gamma2,
+                                                        matrix(z2_matrix, ncol = 1))
 
 # Find the average sensitivity and specificity
 MCMC_sensitivity_df <- MCMC_misclassification_prob %>% 
@@ -246,19 +253,20 @@ MCMC_specificity_df <- MCMC_misclassification_prob %>%
 MCMC_specificity <- mean(MCMC_specificity_df$Probability)
 
 MCMC_sensitivity2_df <- MCMC_misclassification_prob2 %>%
-  filter(Y == 1) %>% filter(Ystar == 1) %>% filter(Ytilde == 1)
+  filter(Y == 1) %>% filter(Ystar1 == 1) %>% filter(Ystar2== 1)
 MCMC_sensitivity2 <- mean(MCMC_sensitivity2_df$Probability)
 
 MCMC_specificity2_df <- MCMC_misclassification_prob2 %>%
-  filter(Y == 2) %>% filter(Ystar == 2) %>% filter(Ytilde == 2)
+  filter(Y == 2) %>% filter(Ystar1 == 2) %>% filter(Ystar2 == 2)
 MCMC_specificity2 <- mean(MCMC_specificity2_df$Probability)
 ```
 
 ```{r}
 # Use the generated data to compute the actual sensitivity and specificity rate.
-data_classification_table <- table(my_data[["obs_Ystar"]], my_data[["true_Y"]])
+data_classification_table <- table(my_data[["obs_Ystar1"]], my_data[["true_Y"]])
 
-data_classification_table2 <- table(my_data[["obs_Ytilde"]], my_data[["obs_Ystar"]], my_data[["true_Y"]])
+data_classification_table2 <- table(my_data[["obs_Ystar2"]],
+                                    my_data[["obs_Ystar1"]], my_data[["true_Y"]])
 
 true_sensitivity <- prop.table(data_classification_table, 2)[1,1]
 
@@ -292,7 +300,7 @@ kbl(t(misclass_results2), col.names = c("P(Y*(2) = 1 |Y*(1) = 1,  Y = 1)",
     booktabs = TRUE) %>%
   kable_styling(latex_options = "HOLD_position")
 ```
-**Table 1** shows the actual sensitivity and specificity values for the data, in addition to the average sensitivity and specificity estimates computed from EM-Algorithm and MCMC parameter estimates and the covariate $z$ and $v$. 
+**Table 1** shows the actual sensitivity and specificity values for the data, in addition to the average sensitivity and specificity estimates computed from EM-Algorithm and MCMC parameter estimates and the covariate $Z^{(1)}$ and $Z^{(2)}$. 
 
 ## References
 Hochstedler, K.A. and Wells, M.T. ``Statistical inference for association studies in the presence of binary outcome misclassification", (2022). In preparation.
